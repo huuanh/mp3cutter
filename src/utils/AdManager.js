@@ -1,0 +1,846 @@
+import { AppOpenAd, InterstitialAd, BannerAd, AdEventType, TestIds, AdsConsent, MobileAds, NativeAd, NativeAdView, NativeAdEventType, RewardedAd, HeadlineView, MediaView, TaglineView, AdvertiserView, CallToActionView, IconView } from 'react-native-google-mobile-ads';
+import React from 'react';
+import { View, StyleSheet } from 'react-native';
+import mobileAds from 'react-native-google-mobile-ads';
+import { checkVipStatus } from './VipUtils';
+// import AnalyticsManager from './AnalyticsManager';
+import remoteConfigManager from './RemoteConfigManager';
+
+const IS_PRODUCTION = false; // Set to true for production builds
+
+let AnalyticsManager = null;
+try {
+    AnalyticsManager = require('./AnalyticsManager').default;
+} catch (error) {
+    console.log('Managers not available in AdManager');
+}
+
+export const ADS_UNIT_VALUES = {
+  DEV: {
+    // App Open Ads
+    APP_OPEN: TestIds.APP_OPEN,
+    
+    // Native Ads
+    NATIVE: TestIds.NATIVE,
+    NATIVE_LANGUAGE: TestIds.NATIVE,
+    NATIVE_ONBOARD: TestIds.NATIVE,
+    NATIVE_HOME: TestIds.NATIVE,
+    NATIVE_HAIRCLIPPER: TestIds.NATIVE,
+    NATIVE_HAIRCLIPPER_ITEM: TestIds.NATIVE,
+    NATIVE_HAIRDRY: TestIds.NATIVE,
+    NATIVE_HAIRDRY_ITEM: TestIds.NATIVE,
+    NATIVE_FUNNYSOUND: TestIds.NATIVE,
+    NATIVE_FUNNYSOUND_ITEM: TestIds.NATIVE,
+    NATIVE_DIYMAKER: TestIds.NATIVE,
+    NATIVE_DIYMAKER_SAVE: TestIds.NATIVE,
+    NATIVE_SETTINGS: TestIds.NATIVE,
+
+    // Interstitial Ads
+    INTERSTITIAL_HOME: TestIds.INTERSTITIAL,
+    INTERSTITIAL_HAIRCLIPPER: TestIds.INTERSTITIAL,
+    // INTERSTITIAL_HAIRCLIPPER_ITEM: TestIds.INTERSTITIAL,
+    INTERSTITIAL_HAIRDRY: TestIds.INTERSTITIAL,
+    // INTERSTITIAL_HAIRDRY_ITEM: TestIds.INTERSTITIAL,
+    INTERSTITIAL_FUNNYSOUND: TestIds.INTERSTITIAL,
+    // INTERSTITIAL_FUNNYSOUND_ITEM: TestIds.INTERSTITIAL,
+    INTERSTITIAL_DIYMAKER: TestIds.INTERSTITIAL,
+    // INTERSTITIAL_DIYMAKER_ITEM: TestIds.INTERSTITIAL,
+
+    REWARDER: TestIds.REWARDED,
+  },
+  PROD: {
+    // App Open Ads
+    APP_OPEN: 'ca-app-pub-7156273402668618/7520721776',
+    // Native Ads
+    NATIVE: 'ca-app-pub-7156273402668618/2911269216',
+    NATIVE_LANGUAGE: 'ca-app-pub-7156273402668618/2911269216',
+    NATIVE_ONBOARD: 'ca-app-pub-7156273402668618/3745946536',
+    NATIVE_HOME: 'ca-app-pub-7156273402668618/6180538181',
+    NATIVE_HAIRCLIPPER: 'ca-app-pub-7156273402668618/4867456516',
+    NATIVE_HAIRCLIPPER_ITEM: 'ca-app-pub-7156273402668618/3445745392',
+    NATIVE_HAIRDRY: 'ca-app-pub-7156273402668618/4032779191',
+    NATIVE_HAIRDRY_ITEM: 'ca-app-pub-7156273402668618/7780452516',
+    NATIVE_FUNNYSOUND: 'ca-app-pub-7156273402668618/8539000410',
+    NATIVE_FUNNYSOUND_ITEM: 'ca-app-pub-7156273402668618/2076823401',
+    NATIVE_DIYMAKER: 'ca-app-pub-7156273402668618/7907734582',
+    NATIVE_DIYMAKER_SAVE: 'ca-app-pub-7156273402668618/9763741731',
+    NATIVE_SETTINGS: 'ca-app-pub-7156273402668618/7137578392',
+
+    // Interstitial Ads
+    INTERSTITIAL_HOME: 'ca-app-pub-7156273402668618/1802309474',
+    INTERSTITIAL_HAIRCLIPPER: 'ca-app-pub-7156273402668618/4264821282',
+    // INTERSTITIAL_HAIRCLIPPER_ITEM: 'ca-app-pub-7156273402668618/9489227804',
+    INTERSTITIAL_HAIRDRY: 'ca-app-pub-7156273402668618/9325576277',
+    // INTERSTITIAL_HAIRDRY_ITEM: 'ca-app-pub-7156273402668618/8563158949',
+    INTERSTITIAL_FUNNYSOUND: 'ca-app-pub-7156273402668618/7250077277',
+    // INTERSTITIAL_FUNNYSOUND_ITEM: 'ca-app-pub-7156273402668618/1447086251',
+    INTERSTITIAL_DIYMAKER: 'ca-app-pub-7156273402668618/7907734582',
+    // INTERSTITIAL_DIYMAKER_ITEM: 'ca-app-pub-7156273402668618/4236901126',
+
+    REWARDER: 'ca-app-pub-7156273402668618/3841207508',
+  },
+};
+
+export const ADS_UNIT = IS_PRODUCTION ? ADS_UNIT_VALUES.PROD : ADS_UNIT_VALUES.DEV;
+
+class AdManager {
+    constructor() {
+        this.isInitialized = false;
+        this.GoogleMobileAds = null;
+        this.BannerAd = null;
+        this.InterstitialAd = null;
+        this.RewardedAd = null;
+        this.AppOpenAd = null;
+        this.AdEventType = null;
+        this.isAppOpenAdLoading = false; // Add flag to prevent multiple app open ads
+        this.lastAppOpenAdTime = 0; // Track last app open ad time
+        this.APP_OPEN_AD_COOLDOWN = 30000; // 30 seconds cooldown between app open ads
+        
+        // Interstitial ads timing control
+        this.lastInterstitialAdTime = 0; // Track last interstitial ad show time
+        this.INTERSTITIAL_AD_COOLDOWN = 60; // Default 60 seconds, will be overridden by Remote Config
+
+        // Preloaded ads cache
+        this.preloadedAds = {
+            interstitial: {},
+            rewarded: null,
+            appOpen: null,
+        };
+
+        // Loading states for ads
+        this.adLoadingStates = {
+            interstitial: false,
+            rewarded: false,
+            appOpen: false,
+        };
+
+        // Try to load Google Mobile Ads if available
+        this.loadGoogleMobileAds();
+    }
+
+    // Load Google Mobile Ads if available
+    loadGoogleMobileAds() {
+        console.log('🔄 Loading Google Mobile Ads module...', mobileAds); 
+        try {
+            const GoogleMobileAdsModule = require('react-native-google-mobile-ads');
+            console.log('📦 Module loaded, extracting components...');
+            console.log('🔍 Full module structure:', Object.keys(GoogleMobileAdsModule));
+
+            // Extract components first
+            this.BannerAd = GoogleMobileAdsModule.BannerAd;
+            this.InterstitialAd = GoogleMobileAdsModule.InterstitialAd;
+            this.RewardedAd = GoogleMobileAdsModule.RewardedAd;
+            this.AppOpenAd = GoogleMobileAdsModule.AppOpenAd;
+            this.NativeAd = GoogleMobileAdsModule.NativeAd;
+            this.AdEventType = GoogleMobileAdsModule.AdEventType;
+            this.RewardedAdEventType = GoogleMobileAdsModule.RewardedAdEventType;
+
+            // Try to get MobileAds from different possible exports
+            this.GoogleMobileAds = GoogleMobileAdsModule.MobileAds || 
+                                   GoogleMobileAdsModule.default || 
+                                   GoogleMobileAdsModule;
+
+            // Since RewardedAd is available, we can use that as the indicator
+            const isModuleAvailable = !!(this.RewardedAd && this.AdEventType && this.RewardedAdEventType);
+            this.isModuleLoaded = isModuleAvailable;
+
+            console.log('✅ Google Mobile Ads module loaded successfully');
+            console.log('🔍 MobileAds object:', this.GoogleMobileAds ? 'Available' : 'Not Available');
+            console.log('🔍 MobileAds type:', typeof this.GoogleMobileAds);
+            console.log('🔍 MobileAds keys:', this.GoogleMobileAds ? Object.keys(this.GoogleMobileAds) : 'N/A');
+            console.log('🔍 RewardedAd available:', !!this.RewardedAd);
+            console.log('🔍 RewardedAdEventType available:', !!this.RewardedAdEventType);
+            console.log('🔍 AdEventType available:', !!this.AdEventType);
+            console.log('🔍 Module actually available:', isModuleAvailable);
+            
+            // Check if initialize method exists in different places
+            const hasInitialize = (this.GoogleMobileAds && typeof this.GoogleMobileAds.initialize === 'function') ||
+                                  (GoogleMobileAdsModule.MobileAds && typeof GoogleMobileAdsModule.MobileAds.initialize === 'function') ||
+                                  (GoogleMobileAdsModule.default && typeof GoogleMobileAdsModule.default.initialize === 'function') ||
+                                  (typeof GoogleMobileAdsModule.initialize === 'function');
+            console.log('🔍 Initialize method available:', hasInitialize);
+            
+        } catch (error) {
+            console.log('⚠️ Google Mobile Ads not available, using mock ads:', error.message);
+            this.GoogleMobileAds = null;
+            this.BannerAd = null;
+            this.InterstitialAd = null;
+            this.RewardedAd = null;
+            this.AppOpenAd = null;
+            this.NativeAd = null;
+            this.AdEventType = null;
+            this.RewardedAdEventType = null;
+            this.isModuleLoaded = false;
+            // For demonstration, we'll simulate ads being available
+            this.isInitialized = true;
+        }
+    }
+
+    // Initialize ads (called once at app start)
+    async initialize() {
+        if (!this.isModuleLoaded) {
+            console.log('🎭 Using mock ads - Google Mobile Ads module not available');
+            this.isInitialized = true;
+            return true;
+        }
+
+        try {
+            // Import the module again to get the latest reference
+            const GoogleMobileAdsModule = require('react-native-google-mobile-ads');
+            
+            // For react-native-google-mobile-ads v15.x, components work without explicit initialization
+            // The SDK will auto-initialize when first component is used
+            console.log('✅ Google Mobile Ads module is ready');
+            
+            this.isInitialized = true;
+            
+            // Start preloading ads after initialization
+            this.preloadAllAds();
+            
+            return true;
+        } catch (error) {
+            console.log('❌ Failed to initialize Google Mobile Ads:', error);
+            // Don't fail completely - we can still use the ad components
+            this.isInitialized = true;
+            
+            // Still try to preload ads
+            this.preloadAllAds();
+            
+            return true;
+        }
+    }
+
+    
+    // Preload all ads
+    preloadAllAds() {
+        // Don't preload ads for VIP users
+        if (checkVipStatus()) {
+            console.log('👑 VIP user detected - skipping ad preloading');
+            return;
+        }
+        
+        console.log('🔄 Starting to preload all ads...');
+        this.preloadInterstitialAd(ADS_UNIT.INTERSTITIAL_HOME);
+        this.preloadInterstitialAd(ADS_UNIT.INTERSTITIAL_HAIRCLIPPER);
+        this.preloadInterstitialAd(ADS_UNIT.INTERSTITIAL_HAIRDRY);
+        this.preloadInterstitialAd(ADS_UNIT.INTERSTITIAL_FUNNYSOUND);
+        this.preloadInterstitialAd(ADS_UNIT.INTERSTITIAL_DIYMAKER);
+        // this.preloadRewardedAd();
+        this.preloadAppOpenAd();
+
+        this.preloadRewardedAd();
+    }
+
+    
+    // Preload interstitial ad
+    preloadInterstitialAd(adId = ADS_UNIT.INTERSTITIAL_HOME) {
+        // Don't preload ads for VIP users
+        if (checkVipStatus()) {
+            console.log('👑 VIP user - skipping interstitial ad preload');
+            return;
+        }
+
+        if (!this.isModuleLoaded || this.adLoadingStates.interstitial || this.preloadedAds.interstitial[adId]) {
+            return;
+        }
+
+        const adUnitId = adId; // Use the provided ad ID
+
+        try {
+            console.log('🔄 Preloading interstitial ad...');
+            this.adLoadingStates.interstitial = true;
+
+            const interstitial = this.InterstitialAd.createForAdRequest(adUnitId);
+
+            const unsubscribeLoaded = interstitial.addAdEventListener(this.AdEventType.LOADED, () => {
+                console.log('✅ Interstitial ad preloaded successfully');
+                this.preloadedAds.interstitial[adId] = interstitial;
+                this.adLoadingStates.interstitial = false;
+                unsubscribeLoaded();
+                unsubscribeError();
+            });
+
+            const unsubscribeError = interstitial.addAdEventListener(this.AdEventType.ERROR, (error) => {
+                console.log('❌ Failed to preload interstitial ad:', error);
+                this.adLoadingStates.interstitial = false;
+                unsubscribeLoaded();
+                unsubscribeError();
+                
+                // Retry after 30 seconds
+                setTimeout(() => this.preloadInterstitialAd(adId), 30000);
+            });
+
+            interstitial.load();
+        } catch (error) {
+            console.log('❌ Error preloading interstitial ad:', error);
+            this.adLoadingStates.interstitial = false;
+        }
+    }
+
+    // Preload rewarded ad
+    preloadRewardedAd() {
+        // Don't preload ads for VIP users (but rewarded ads might still be shown)
+        if (checkVipStatus()) {
+            console.log('👑 VIP user - skipping rewarded ad preload');
+            return;
+        }
+        
+        if (!this.isModuleLoaded || this.adLoadingStates.rewarded || this.preloadedAds.rewarded) {
+            return;
+        }
+
+        try {
+            console.log('🔄 Preloading rewarded ad...');
+            this.adLoadingStates.rewarded = true;
+
+            const rewarded = this.RewardedAd.createForAdRequest(ADS_UNIT.REWARDER);
+
+            const unsubscribeLoaded = rewarded.addAdEventListener(this.RewardedAdEventType.LOADED, () => {
+                console.log('✅ Rewarded ad preloaded successfully');
+                this.preloadedAds.rewarded = rewarded;
+                this.adLoadingStates.rewarded = false;
+                unsubscribeLoaded();
+                unsubscribeError();
+            });
+
+            const unsubscribeError = rewarded.addAdEventListener(this.AdEventType.ERROR, (error) => {
+                console.log('❌ Failed to preload rewarded ad:', error);
+                this.adLoadingStates.rewarded = false;
+                unsubscribeLoaded();
+                unsubscribeError();
+                
+                // Retry after 30 seconds
+                setTimeout(() => this.preloadRewardedAd(), 30000);
+            });
+
+            rewarded.load();
+        } catch (error) {
+            console.log('❌ Error preloading rewarded ad:', error);
+            this.adLoadingStates.rewarded = false;
+        }
+    }
+
+    // Preload app open ad
+    preloadAppOpenAd() {
+        // Don't preload ads for VIP users
+        if (checkVipStatus()) {
+            console.log('👑 VIP user - skipping app open ad preload');
+            return;
+        }
+        
+        if (!this.isModuleLoaded || this.adLoadingStates.appOpen || this.preloadedAds.appOpen) {
+            return;
+        }
+
+        const adUnitId = ADS_UNIT.APP_OPEN;
+
+        try {
+            console.log('🔄 Preloading app open ad...');
+            this.adLoadingStates.appOpen = true;
+
+            const appOpen = this.AppOpenAd.createForAdRequest(adUnitId);
+
+            const unsubscribeLoaded = appOpen.addAdEventListener(this.AdEventType.LOADED, () => {
+                console.log('✅ App open ad preloaded successfully');
+                this.preloadedAds.appOpen = appOpen;
+                this.adLoadingStates.appOpen = false;
+                unsubscribeLoaded();
+                unsubscribeError();
+            });
+
+            const unsubscribeError = appOpen.addAdEventListener(this.AdEventType.ERROR, (error) => {
+                console.log('❌ Failed to preload app open ad:', error);
+                this.adLoadingStates.appOpen = false;
+                unsubscribeLoaded();
+                unsubscribeError();
+                
+                // Retry after 60 seconds (longer for app open ads)
+                setTimeout(() => this.preloadAppOpenAd(), 60000);
+            });
+
+            appOpen.load();
+        } catch (error) {
+            console.log('❌ Error preloading app open ad:', error);
+            this.adLoadingStates.appOpen = false;
+        }
+    }
+
+    // Check if ads are initialized
+    isAdsInitialized() {
+        return this.isInitialized;
+    }
+
+    // Check if Google Mobile Ads is available
+    isGoogleMobileAdsAvailable() {
+        return this.isModuleLoaded;
+    }
+
+    // Get interstitial ad cooldown from Remote Config
+    getInterstitialCooldown() {
+        try {
+            if (remoteConfigManager && remoteConfigManager.isInitialized) {
+                const configValue = remoteConfigManager.distanceTimeToShowInterstitial();
+                const cooldown = parseInt(configValue);
+                return isNaN(cooldown) ? this.INTERSTITIAL_AD_COOLDOWN : cooldown;
+            }
+        } catch (error) {
+            console.log('⚠️ Error getting interstitial cooldown from Remote Config:', error);
+        }
+        return this.INTERSTITIAL_AD_COOLDOWN; // Fallback to default
+    }
+
+    // Check if interstitial ad can be shown based on cooldown
+    canShowInterstitialAd() {
+        const currentTime = Date.now();
+        const cooldown = this.getInterstitialCooldown();
+        const timeSinceLastAd = currentTime - this.lastInterstitialAdTime;
+        
+        console.log('🕒 Interstitial ad timing check:');
+        console.log('  Current time:', currentTime);
+        console.log('  Last ad time:', this.lastInterstitialAdTime);
+        console.log('  Time since last ad:', timeSinceLastAd, 'ms');
+        console.log('  Required cooldown:', cooldown, 'ms');
+        console.log('  Can show:', timeSinceLastAd >= cooldown);
+        
+        return timeSinceLastAd >= cooldown * 1000;
+    }
+
+    // Get banner component
+    getBannerComponent() {
+        return this.BannerAd;
+    }
+
+    // Get native component
+    getNativeComponent() {
+        return this.NativeAd;
+    }
+
+    // Load and show interstitial ad
+    async showInterstitialAd(adId, onAdClosed, onAdError, usePreloaded = true) {
+        // Don't show ads for VIP users
+        if (checkVipStatus()) {
+            console.log('👑 VIP user - skipping interstitial ad');
+            if (onAdClosed) onAdClosed();
+            return true;
+        }
+        
+        // Check cooldown period for interstitial ads
+        if (!this.canShowInterstitialAd()) {
+            const cooldown = this.getInterstitialCooldown();
+            const timeSinceLastAd = Date.now() - this.lastInterstitialAdTime;
+            const remainingTime = cooldown - timeSinceLastAd;
+            console.log('⏰ Interstitial ad on cooldown, skipping (remaining:', Math.ceil(remainingTime / 1000), 'seconds)');
+            if (onAdClosed) onAdClosed(); // Still call callback to not break flow
+            return false;
+        }
+        
+        if (!this.isAdsInitialized()) {
+            console.log('❌ Cannot show interstitial ad - not initialized');
+            if (onAdError) onAdError('Ads not initialized');
+            return false;
+        }
+
+        if (!this.isModuleLoaded) {
+            // Mock interstitial ad - also record timestamp
+            console.log('🎯 Mock Interstitial Ad: Gun Simulator Pro - Unlock more weapons!');
+            this.lastInterstitialAdTime = Date.now(); // Record timestamp for mock ad too
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    console.log('📱 Mock interstitial ad closed');
+                    if (onAdClosed) onAdClosed();
+                    resolve(true);
+                }, 2000);
+            });
+        }
+
+        // Try to use preloaded ad first
+        if (usePreloaded && this.preloadedAds.interstitial && this.preloadedAds.interstitial[adId]) {
+            console.log('📺 Showing preloaded interstitial ad');
+            const preloadedAd = this.preloadedAds.interstitial[adId];
+            this.preloadedAds.interstitial[adId] = null; // Clear preloaded ad
+
+            return new Promise((resolve, reject) => {
+                const unsubscribeOpened = preloadedAd.addAdEventListener(this.AdEventType.OPENED, () => {
+                    console.log('📺 Preloaded interstitial ad opened - recording timestamp');
+                    this.lastInterstitialAdTime = Date.now(); // Record the time when ad is shown
+                });
+
+                const unsubscribeClosed = preloadedAd.addAdEventListener(this.AdEventType.CLOSED, () => {
+                    console.log('✅ Preloaded interstitial ad closed');
+                    unsubscribeOpened();
+                    unsubscribeClosed();
+                    unsubscribeError();
+                    if (onAdClosed) onAdClosed();
+                    
+                    // Preload next ad
+                    setTimeout(() => this.preloadInterstitialAd(adId), 1000);
+                    resolve(true);
+                });
+
+                const unsubscribeError = preloadedAd.addAdEventListener(this.AdEventType.ERROR, (error) => {
+                    console.log('❌ Preloaded interstitial ad error:', error);
+                    unsubscribeOpened();
+                    unsubscribeClosed();
+                    unsubscribeError();
+                    if (onAdError) onAdError(error);
+                    
+                    // Preload next ad
+                    setTimeout(() => this.preloadInterstitialAd(adId), 1000);
+                    reject(error);
+                });
+
+                try {
+                    preloadedAd.show();
+                } catch (error) {
+                    console.log('❌ Error showing preloaded interstitial ad:', error);
+                    unsubscribeOpened();
+                    unsubscribeClosed();
+                    unsubscribeError();
+                    if (onAdError) onAdError(error);
+                    
+                    // Preload next ad
+                    setTimeout(() => this.preloadInterstitialAd(adId), 1000);
+                    reject(error);
+                }
+            });
+        }
+
+        // Fallback to load and show if no preloaded ad available
+        try {
+            console.log('📺 Loading and showing interstitial ad (no preloaded available)');
+            const interstitial = this.InterstitialAd.createForAdRequest(adId);
+
+            return new Promise((resolve, reject) => {
+                const unsubscribeLoaded = interstitial.addAdEventListener(this.AdEventType.LOADED, () => {
+                    console.log('📺 Interstitial ad loaded');
+                    interstitial.show();
+                });
+
+                const unsubscribeOpened = interstitial.addAdEventListener(this.AdEventType.OPENED, () => {
+                    console.log('📺 Fallback interstitial ad opened - recording timestamp');
+                    this.lastInterstitialAdTime = Date.now(); // Record the time when ad is shown
+                });
+
+                const unsubscribeClosed = interstitial.addAdEventListener(this.AdEventType.CLOSED, () => {
+                    console.log('✅ Interstitial ad closed');
+                    unsubscribeLoaded();
+                    unsubscribeOpened();
+                    unsubscribeClosed();
+                    unsubscribeError();
+                    if (onAdClosed) onAdClosed();
+                    
+                    // Preload next ad
+                    setTimeout(() => this.preloadInterstitialAd(), 1000);
+                    resolve(true);
+                });
+
+                const unsubscribeError = interstitial.addAdEventListener(this.AdEventType.ERROR, (error) => {
+                    console.log('❌ Interstitial ad error:', error);
+                    unsubscribeLoaded();
+                    unsubscribeOpened();
+                    unsubscribeClosed();
+                    unsubscribeError();
+                    if (onAdError) onAdError(error);
+                    
+                    // Preload next ad
+                    setTimeout(() => this.preloadInterstitialAd(), 1000);
+                    reject(error);
+                });
+
+                // Load the ad
+                interstitial.load();
+            });
+        } catch (error) {
+            console.log('❌ Error showing interstitial ad:', error);
+            if (onAdError) onAdError(error);
+            
+            // Preload next ad
+            setTimeout(() => this.preloadInterstitialAd(), 1000);
+            return false;
+        }
+    }
+
+    // Load and show rewarded ad
+    async showRewardedAd(usePreloaded = true) {
+        console.log('🔍 Debug - AdManager.isAdsInitialized():', this.isAdsInitialized());
+        console.log('🔍 Debug - AdManager.isGoogleMobileAdsAvailable():', this.isGoogleMobileAdsAvailable());
+        console.log('🔍 Debug - Module loaded:', this.isModuleLoaded);
+        console.log('🔍 Debug - RewardedAd available:', !!this.RewardedAd);
+        console.log('🔍 Debug - RewardedAdEventType available:', !!this.RewardedAdEventType);
+
+        if (!this.isAdsInitialized()) {
+            console.log('❌ Cannot show rewarded ad - not initialized');
+            return false;
+        }
+
+        // Try to use preloaded ad first
+        if (usePreloaded && this.preloadedAds.rewarded && this.isModuleLoaded) {
+            console.log('🎁 Showing preloaded rewarded ad');
+            const preloadedAd = this.preloadedAds.rewarded;
+            this.preloadedAds.rewarded = null; // Clear preloaded ad
+
+            return new Promise((resolve, reject) => {
+                const unsubscribeEarned = preloadedAd.addAdEventListener(
+                    this.RewardedAdEventType.EARNED_REWARD,
+                    (reward) => {
+                        console.log('💰 User earned reward:', reward);
+                        resolve(reward);
+                    }
+                );
+
+                const unsubscribeClosed = preloadedAd.addAdEventListener(
+                    this.AdEventType.CLOSED,
+                    () => {
+                        console.log('✅ Preloaded rewarded ad closed');
+                        unsubscribe();
+                        
+                        // Preload next ad
+                        setTimeout(() => this.preloadRewardedAd(), 1000);
+                    }
+                );
+
+                const unsubscribeError = preloadedAd.addAdEventListener(
+                    this.AdEventType.ERROR,
+                    (error) => {
+                        console.log('❌ Preloaded rewarded ad error:', error);
+                        unsubscribe();
+                        
+                        // Preload next ad
+                        setTimeout(() => this.preloadRewardedAd(), 1000);
+                        reject(error);
+                    }
+                );
+
+                const unsubscribe = () => {
+                    unsubscribeEarned();
+                    unsubscribeClosed();
+                    unsubscribeError();
+                };
+
+                try {
+                    preloadedAd.show();
+                } catch (error) {
+                    console.log('❌ Error showing preloaded rewarded ad:', error);
+                    unsubscribe();
+                    
+                    // Preload next ad
+                    setTimeout(() => this.preloadRewardedAd(), 1000);
+                    reject(error);
+                }
+            });
+        }
+
+        // Use RewardedAd directly since it's available
+        if (this.RewardedAd && (this.RewardedAdEventType || this.AdEventType)) {
+            console.log('🎁 Loading and showing rewarded ad (no preloaded available)');
+
+            // Use RewardedAdEventType if available, otherwise fall back to AdEventType
+            const EventType = this.RewardedAdEventType || this.AdEventType;
+            console.log('🔍 Using event type:', EventType === this.RewardedAdEventType ? 'RewardedAdEventType' : 'AdEventType');
+            console.log('🔍 Event type values:', Object.keys(EventType));
+
+            try {
+                const rewarded = this.RewardedAd.createForAdRequest(this.getRewardedAdUnitId());
+
+                return new Promise((resolve, reject) => {
+                    const unsubscribeLoaded = rewarded.addAdEventListener(
+                        this.RewardedAdEventType.LOADED,
+                        () => {
+                            console.log('🎁 Rewarded ad loaded');
+                            rewarded.show();
+                        }
+                    );
+
+                    const unsubscribeEarned = rewarded.addAdEventListener(
+                        this.RewardedAdEventType.EARNED_REWARD,
+                        (reward) => {
+                            console.log('💰 User earned reward:', reward);
+                            resolve(reward);
+                        }
+                    );
+
+                    const unsubscribeClosed = rewarded.addAdEventListener(
+                        this.AdEventType.CLOSED,
+                        () => {
+                            console.log('✅ Rewarded ad closed');
+                            unsubscribe();
+                            
+                            // Preload next ad
+                            setTimeout(() => this.preloadRewardedAd(), 1000);
+                        }
+                    );
+
+                    const unsubscribeError = rewarded.addAdEventListener(
+                        this.AdEventType.ERROR,
+                        (error) => {
+                            console.log('❌ Rewarded ad error:', error);
+                            unsubscribe();
+                            
+                            // Preload next ad
+                            setTimeout(() => this.preloadRewardedAd(), 1000);
+                            reject(error);
+                        }
+                    );
+
+                    const unsubscribe = () => {
+                        unsubscribeLoaded();
+                        unsubscribeEarned();
+                        unsubscribeClosed();
+                        unsubscribeError();
+                    };
+
+                    rewarded.load();
+                });
+
+            } catch (error) {
+                console.log('❌ Error showing real rewarded ad:', error);
+                // Preload next ad
+                setTimeout(() => this.preloadRewardedAd(), 1000);
+                // Fall back to mock
+            }
+        }
+
+        // Fallback to mock ad
+        console.log('🎁 Mock Rewarded Ad: Watch to earn extra bullets!');
+        return new Promise((resolve) => {
+            setTimeout(() => {
+                console.log('✅ Mock rewarded ad completed - user earned reward');
+                resolve({ amount: 50, type: 'bullets' });
+            }, 3000);
+        });
+    }
+
+    async showAppOpenAd(usePreloaded = true) {
+        // Don't show ads for VIP users
+        if (checkVipStatus()) {
+            console.log('👑 VIP user - skipping app open ad');
+            return true;
+        }
+        
+        // Check cooldown period
+        const currentTime = Date.now();
+        if (currentTime - this.lastAppOpenAdTime < this.APP_OPEN_AD_COOLDOWN) {
+            console.log('📂 App open ad on cooldown, skipping (last shown', (currentTime - this.lastAppOpenAdTime) / 1000, 'seconds ago)');
+            return false;
+        }
+
+        if (!this.isGoogleMobileAdsAvailable() || !this.isInitialized) {
+            console.log('📱 Google Mobile Ads not available for app open ad');
+            return false;
+        }
+
+        // Prevent multiple simultaneous app open ad requests
+        if (this.isAppOpenAdLoading) {
+            console.log('📂 App open ad already loading, skipping request');
+            return false;
+        }
+
+        // Try to use preloaded ad first
+        if (usePreloaded && this.preloadedAds.appOpen) {
+            console.log('📂 Showing preloaded app open ad');
+            const preloadedAd = this.preloadedAds.appOpen;
+            this.preloadedAds.appOpen = null; // Clear preloaded ad
+            this.lastAppOpenAdTime = currentTime; // Set last shown time
+
+            return new Promise((resolve, reject) => {
+                const unsubscribeClosed = preloadedAd.addAdEventListener(this.AdEventType.CLOSED, () => {
+                    console.log('✅ Preloaded app open ad closed');
+                    unsubscribeClosed();
+                    unsubscribeError();
+                    if (AnalyticsManager) {
+                        AnalyticsManager.logAppOpenAdsLoad(true);
+                    }
+                    
+                    // Preload next ad
+                    setTimeout(() => this.preloadAppOpenAd(), 5000);
+                    resolve(true);
+                });
+
+                const unsubscribeError = preloadedAd.addAdEventListener(this.AdEventType.ERROR, (error) => {
+                    console.log('❌ Preloaded app open ad error:', error);
+                    unsubscribeClosed();
+                    unsubscribeError();
+                    if (AnalyticsManager) {
+                        AnalyticsManager.logAppOpenAdsLoad(false);
+                    }
+                    
+                    // Preload next ad
+                    setTimeout(() => this.preloadAppOpenAd(), 5000);
+                    reject(error);
+                });
+
+                try {
+                    preloadedAd.show();
+                } catch (error) {
+                    console.log('❌ Error showing preloaded app open ad:', error);
+                    unsubscribeClosed();
+                    unsubscribeError();
+                    if (AnalyticsManager) {
+                        AnalyticsManager.logAppOpenAdsLoad(false);
+                    }
+                    
+                    // Preload next ad
+                    setTimeout(() => this.preloadAppOpenAd(), 5000);
+                    reject(error);
+                }
+            });
+        }
+
+        // Fallback to load and show if no preloaded ad available
+        try {
+            console.log('📂 Loading and showing app open ad (no preloaded available)');
+            this.isAppOpenAdLoading = true; // Set loading flag
+            this.lastAppOpenAdTime = currentTime; // Set last shown time
+
+            return new Promise((resolve, reject) => {
+                const appOpenAd = this.AppOpenAd.createForAdRequest(ADS_UNIT.APP_OPEN, {
+                    requestNonPersonalizedAdsOnly: true,
+                });
+
+                const unsubscribeLoaded = appOpenAd.addAdEventListener(this.AdEventType.LOADED, () => {
+                    console.log('📂 App open ad loaded successfully');
+                    if (AnalyticsManager) {
+                        AnalyticsManager.logAppOpenAdsLoad(true);
+                    }
+                    appOpenAd.show();
+                });
+
+                const unsubscribeClosed = appOpenAd.addAdEventListener(this.AdEventType.CLOSED, () => {
+                    console.log('✅ App open ad closed');
+                    this.isAppOpenAdLoading = false; // Reset loading flag
+                    unsubscribeLoaded();
+                    unsubscribeClosed();
+                    unsubscribeError();
+                    
+                    // Preload next ad
+                    setTimeout(() => this.preloadAppOpenAd(), 5000);
+                    resolve(true);
+                });
+
+                const unsubscribeError = appOpenAd.addAdEventListener(this.AdEventType.ERROR, (error) => {
+                    console.log('❌ App open ad error:', error);
+                    this.isAppOpenAdLoading = false; // Reset loading flag
+                    if (AnalyticsManager) {
+                        AnalyticsManager.logAppOpenAdsLoad(false);
+                    }
+                    unsubscribeLoaded();
+                    unsubscribeClosed();
+                    unsubscribeError();
+                    
+                    // Preload next ad
+                    setTimeout(() => this.preloadAppOpenAd(), 5000);
+                    reject(error);
+                });
+
+                // Load the ad
+                appOpenAd.load();
+            });
+        } catch (error) {
+            console.log('❌ Error showing app open ad:', error);
+            this.isAppOpenAdLoading = false; // Reset loading flag on error
+            return false;
+        }
+    }
+}
+
+export default new AdManager();

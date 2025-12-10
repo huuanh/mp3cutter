@@ -1,0 +1,44 @@
+buildscript {
+    ext {
+        buildToolsVersion = "36.0.0"
+        minSdkVersion = 24
+        compileSdkVersion = 36
+        targetSdkVersion = 36
+        ndkVersion = "27.1.12297006"
+        kotlinVersion = "2.1.20"
+    }
+    repositories {
+        google()
+        mavenCentral()
+        maven { url "https://maven.aliyun.com/repository/public" }
+        maven { url "https://maven.aliyun.com/repository/google" }
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        classpath 'com.google.gms:google-services:4.4.2'
+        classpath 'com.google.firebase:firebase-crashlytics-gradle:3.0.2'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+
+        // Maven Central mirror nhanh hơn
+        maven { url "https://repo1.maven.org/maven2" }
+
+        // Backup mirror từ Aliyun (TQ)
+        maven { url "https://maven.aliyun.com/repository/public" }
+
+        maven { url "https://jitpack.io" }
+        // Mintegral
+        maven { url "https://dl-maven-android.mintegral.com/repository/mbridge_android_sdk_oversea" }
+        // Pangle
+        maven { url "https://artifact.bytedance.com/repository/pangle" }
+    }
+}
+apply plugin: "com.facebook.react.rootproject"

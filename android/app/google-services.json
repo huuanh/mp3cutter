@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "410418499328",
+    "project_id": "mp3cutter-b6ee9",
+    "storage_bucket": "mp3cutter-b6ee9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:410418499328:android:b95b11b44886317597ade5",
+        "android_client_info": {
+          "package_name": "boom.mp3.cutter.videotoaudio.edit"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAN7uMctNWSBRyT2rI7yTU9sYAepf20zv4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
