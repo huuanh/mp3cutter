@@ -1,6 +1,7 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
     Image,
     PermissionsAndroid,
@@ -12,6 +13,7 @@ import {
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import RNFS from 'react-native-fs';
 
@@ -56,19 +58,42 @@ const ensurePermission = async () => {
     }
 
     if (Platform.Version >= 33) {
-        const scopedPermission =
-            PermissionsAndroid.PERMISSIONS.READ_MEDIA_AUDIO ?? PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES;
+        const scopedPermission = PermissionsAndroid.PERMISSIONS.READ_MEDIA_AUDIO;
 
         if (!scopedPermission) {
             return true;
         }
 
-        const result = await PermissionsAndroid.request(scopedPermission);
+        const checkResult = await PermissionsAndroid.check(scopedPermission);
+        if (checkResult) {
+            return true;
+        }
+
+        const result = await PermissionsAndroid.request(scopedPermission, {
+            title: 'Audio File Permission',
+            message: 'This app needs access to your audio files to let you select and edit them.',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+        });
         return result === PermissionsAndroid.RESULTS.GRANTED;
     }
 
+    const legacyPermission = PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+    const checkResult = await PermissionsAndroid.check(legacyPermission);
+    if (checkResult) {
+        return true;
+    }
+
     const legacy = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+        legacyPermission,
+        {
+            title: 'Storage Permission',
+            message: 'This app needs access to your storage to let you select audio files.',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+        }
     );
     return legacy === PermissionsAndroid.RESULTS.GRANTED;
 };
@@ -100,25 +125,56 @@ const formatFileSize = (bytes: number) => {
 };
 
 const isAudioFile = (name: string) => AUDIO_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext));
-
 const AudioFileSelectScreen: React.FC = () => {
     const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+    const insets = useSafeAreaInsets();
     const [loading, setLoading] = useState(false);
     const [files, setFiles] = useState<AudioFileItem[]>([]);
     const [error, setError] = useState<string | null>(null);
+    const [permissionGranted, setPermissionGranted] = useState<boolean | null>(null);
+
+    // Request permission when screen loads
+    useEffect(() => {
+        const requestPermission = async () => {
+            const granted = await ensurePermission();
+            setPermissionGranted(granted);
+            
+            if (!granted) {
+                Alert.alert(
+                    'Permission Required',
+                    'Audio file access is required to browse and select your audio files. Please grant permission in your device settings.',
+                    [
+                        {
+                            text: 'Cancel',
+                            onPress: () => navigation.goBack(),
+                            style: 'cancel',
+                        },
+                        {
+                            text: 'Try Again',
+                            onPress: async () => {
+                                const retryGranted = await ensurePermission();
+                                setPermissionGranted(retryGranted);
+                                if (!retryGranted) {
+                                    navigation.goBack();
+                                }
+                            },
+                        },
+                    ]
+                );
+            }
+        };
+
+        requestPermission();
+    }, [navigation]);
 
     const loadFiles = useCallback(async () => {
+        if (!permissionGranted) {
+            return;
+        }
+
         setLoading(true);
         setError(null);
         try {
-            const granted = await ensurePermission();
-            if (!granted) {
-                setError('Permission required to browse audio files.');
-                setFiles([]);
-                setLoading(false);
-                return;
-            }
-
             const directories = getCandidateDirectories();
             const discovered: AudioFileItem[] = [];
 
@@ -175,13 +231,13 @@ const AudioFileSelectScreen: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [permissionGranted]);
 
     useFocusEffect(
         useCallback(() => {
             let mounted = true;
             const run = async () => {
-                if (!mounted) {
+                if (!mounted || !permissionGranted) {
                     return;
                 }
                 await loadFiles();
@@ -190,7 +246,7 @@ const AudioFileSelectScreen: React.FC = () => {
             return () => {
                 mounted = false;
             };
-        }, [loadFiles]),
+        }, [loadFiles, permissionGranted]),
     );
 
     const handleSelect = useCallback(
@@ -208,13 +264,21 @@ const AudioFileSelectScreen: React.FC = () => {
     const listContentStyle = useMemo(
         () => ({
             paddingHorizontal: 20,
-            paddingBottom: 160,
+            paddingTop: 10,
+            paddingBottom: 20,
         }),
         [],
     );
 
+    const getAudioIcon = (index: number) => {
+        // Alternate between two icon styles for visual variety
+        return index % 2 === 0 
+            ? require('../../assets/icon/mp3.png')
+            : require('../../assets/icon/m4a.png');
+    };
+
     return (
-        <View style={styles.safeArea}>
+        <View style={[styles.safeArea, { paddingTop: insets.top }]} >
             <LinearGradient
                 colors={GradientStyles.dark.colors}
                 start={GradientStyles.dark.start}
@@ -229,7 +293,17 @@ const AudioFileSelectScreen: React.FC = () => {
                 </View>
 
                 <View style={styles.content}>
-                    {loading ? (
+                    {permissionGranted === null ? (
+                        <View style={styles.loadingWrapper}>
+                            <ActivityIndicator size="large" color={Colors.white} />
+                            <Text style={styles.loadingText}>Requesting permission…</Text>
+                        </View>
+                    ) : !permissionGranted ? (
+                        <View style={styles.emptyState}>
+                            <Text style={styles.emptyTitle}>Permission Required</Text>
+                            <Text style={styles.emptySubtitle}>Please grant audio file access to browse your music.</Text>
+                        </View>
+                    ) : loading ? (
                         <View style={styles.loadingWrapper}>
                             <ActivityIndicator size="large" color={Colors.white} />
                             <Text style={styles.loadingText}>Scanning audio files…</Text>
@@ -247,10 +321,12 @@ const AudioFileSelectScreen: React.FC = () => {
                             data={files}
                             keyExtractor={(item) => item.path}
                             contentContainerStyle={listContentStyle}
-                            ItemSeparatorComponent={() => <View style={styles.separator} />}
-                            renderItem={({ item }) => (
-                                <TouchableOpacity style={styles.row} activeOpacity={0.9} onPress={() => handleSelect(item)}>
-                                    <Image source={require('../../assets/icon/mp3.png')} style={styles.audioIcon} />
+                            renderItem={({ item, index }) => (
+                                <TouchableOpacity 
+                                    style={styles.row} 
+                                    activeOpacity={0.7} 
+                                    onPress={() => handleSelect(item)}>
+                                    <Image source={getAudioIcon(index)} style={styles.audioIcon} />
                                     <View style={styles.rowContent}>
                                         <Text style={styles.rowTitle} numberOfLines={1}>
                                             {item.name}
@@ -355,50 +431,35 @@ const styles = StyleSheet.create({
         color: Colors.background,
         fontWeight: '700',
     },
-    separator: {
-        height: 1,
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        marginVertical: 12,
-    },
     audioIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        justifyContent: 'center',
-        alignItems: 'center',
+        width: 48,
+        height: 48,
+        borderRadius: 24,
         marginRight: 14,
     },
     row: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 8,
-    },
-    rowIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 14,
+        paddingVertical: 12,
+        paddingHorizontal: 4,
     },
     rowContent: {
         flex: 1,
+        justifyContent: 'center',
     },
     rowTitle: {
         color: Colors.white,
-        fontSize: 12,
-        fontWeight: '700',
+        fontSize: 14,
+        fontWeight: '600',
+        marginBottom: 4,
     },
     rowSubtitle: {
-        marginTop: 4,
-        color: Colors.gray,
+        color: 'rgba(255, 255, 255, 0.6)',
         fontSize: 12,
     },
     adContainer: {
-        // position: 'absolute',
-        // bottom: 20,
-        // left: 20,
-        // right: 20,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
     },
 });
 

@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect } from 'react';
-import { StatusBar } from 'react-native';
+import { StatusBar, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import 'react-native-gesture-handler';
 import firebase from '@react-native-firebase/app';
@@ -16,6 +16,7 @@ import { useNetworkConnection } from './src/hooks/useNetworkConnection';
 
 function App() {
   const { isConnected, isRetrying, retryConnection } = useNetworkConnection();
+  // const insets = useSafeAreaInsets();
 
   useEffect(() => {
     // Initialize Firebase if not already initialized
@@ -45,7 +46,6 @@ function App() {
 
   return (
     <SafeAreaProvider>
-      {/* <SafeAreaView style={{ flex: 1 }}> */}
         <StatusBar barStyle="dark-content" backgroundColor="#2A2128" />
         
         {/* Main App Content - only render when connected */}
@@ -57,7 +57,6 @@ function App() {
           isRetrying={isRetrying}
           onRetry={retryConnection}
         />
-      {/* </SafeAreaView> */}
     </SafeAreaProvider>
   );
 }

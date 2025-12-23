@@ -12,6 +12,7 @@ import {
   HomeScreen,
   SettingsScreen,
   CutAudioScreen,
+  AudioFileSelectScreen,
 } from '../screens';
 
 export type RootStackParamList = {
@@ -20,6 +21,7 @@ export type RootStackParamList = {
   [SCREEN_NAMES.ONBOARDING]: undefined;
   [SCREEN_NAMES.HOME]: undefined;
   [SCREEN_NAMES.SETTINGS]: undefined;
+  [SCREEN_NAMES.AUDIO_FILE_SELECT]: undefined;
   [SCREEN_NAMES.CUT_AUDIO]: {
     uri: string;
     name: string;
@@ -43,6 +45,7 @@ const RootNavigator: React.FC = () => {
         <Stack.Screen name={SCREEN_NAMES.ONBOARDING} component={OnboardingScreen} />
         <Stack.Screen name={SCREEN_NAMES.HOME} component={HomeScreen} />
         <Stack.Screen name={SCREEN_NAMES.SETTINGS} component={SettingsScreen} />
+        <Stack.Screen name={SCREEN_NAMES.AUDIO_FILE_SELECT} component={AudioFileSelectScreen} />
         <Stack.Screen name={SCREEN_NAMES.CUT_AUDIO} component={CutAudioScreen} />
       </Stack.Navigator>
     </NavigationContainer>

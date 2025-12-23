@@ -1,6 +1,7 @@
 import React from 'react';
-import { SafeAreaView, View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors } from '../constants/colors';
 import { SCREEN_NAMES } from '../constants';
@@ -26,13 +27,13 @@ const formatFileSize = (bytes: number) => {
 type CutAudioRouteProp = RouteProp<RootStackParamList, typeof SCREEN_NAMES.CUT_AUDIO>;
 
 type CutAudioFileParams = RootStackParamList[typeof SCREEN_NAMES.CUT_AUDIO];
-
 const CutAudioScreen: React.FC = () => {
   const route = useRoute<CutAudioRouteProp>();
+  const insets = useSafeAreaInsets();
   const { name, type, size, uri } = route.params;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={[styles.safeArea, { paddingTop: insets.top }]} >
       <ScrollView contentContainerStyle={styles.container} bounces={false}>
         <Text style={styles.heading}>Selected Audio</Text>
 
@@ -58,7 +59,7 @@ const CutAudioScreen: React.FC = () => {
           </Text>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 

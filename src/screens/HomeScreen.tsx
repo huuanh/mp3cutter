@@ -251,43 +251,27 @@ const HomeScreen: React.FC = () => {
 
   const handleCutAudioPress = useCallback(async () => {
     try {
-      const file = await DocumentPicker.pickSingle({
-        type: [DocumentPickerTypes.audio],
-        presentationStyle: 'fullScreen',
-      });
-
-      if (!file) {
-        return;
-      }
-
-      const targetUri = file.fileCopyUri ?? file.uri;
-
-      if (!targetUri) {
-        Alert.alert(
-          t('cut_audio.missing_uri.title', 'Unable to open file'),
-          t('cut_audio.missing_uri.message', 'We could not access that audio file. Please try another one.'),
-        );
-        return;
-      }
-
-      navigation.navigate(SCREEN_NAMES.CUT_AUDIO, {
-        uri: targetUri,
-        name: file.name ?? 'audio',
-        size: file.size ?? 0,
-        type: file.type ?? 'audio/*',
-      });
-    } catch (error) {
-      if (DocumentPicker.isCancel(error)) {
-        return;
-      }
-
-      console.error('DocumentPicker error:', error);
-      Alert.alert(
-        t('cut_audio.error.title', 'Unable to open file'),
-        t('cut_audio.error.message', 'Something went wrong while selecting your audio. Please try again.'),
+      // Show interstitial ad before navigation
+      console.log('🎯 Showing interstitial ad before navigation to AudioFileSelect');
+      await AdManager.showInterstitialAd(
+        ADS_UNIT.INTERSTITIAL_HOME,
+        () => {
+          // Navigate to AudioFileSelectScreen after ad is closed
+          console.log('📱 Interstitial ad closed, navigating to AudioFileSelect');
+          navigation.navigate(SCREEN_NAMES.AUDIO_FILE_SELECT as never);
+        },
+        (error: any) => {
+          // Navigate even if ad fails
+          console.log('❌ Interstitial ad failed, navigating anyway:', error);
+          navigation.navigate(SCREEN_NAMES.AUDIO_FILE_SELECT as never);
+        }
       );
+    } catch (error) {
+      // Fallback navigation if ad fails
+      console.log('❌ Error showing interstitial ad, navigating anyway:', error);
+      navigation.navigate(SCREEN_NAMES.AUDIO_FILE_SELECT as never);
     }
-  }, [navigation, t]);
+  }, [navigation]);
 
   const handleFeatureSelect = async (item: FeatureItem) => {
     if (item.requiresVip) {
