@@ -18,7 +18,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import LinearGradient from 'react-native-linear-gradient';
-import DocumentPicker, { types as DocumentPickerTypes } from 'react-native-document-picker';
 
 import { Colors, GradientStyles } from '../constants/colors';
 import { SCREEN_NAMES } from '../constants';
