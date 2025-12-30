@@ -5,6 +5,7 @@
 import React from 'react';
 import { View, StyleSheet, Dimensions } from 'react-native';
 import Svg, { Rect } from 'react-native-svg';
+import { Colors } from '../constants/colors';
 
 interface WaveformViewProps {
   peaks: number[];
@@ -20,14 +21,14 @@ export const WaveformView: React.FC<WaveformViewProps> = ({
   peaks,
   width = Dimensions.get('window').width - 40,
   height = 120,
-  color = '#8E5AF7',
+  color = Colors.primary,
   backgroundColor = 'transparent',
-  barWidth = 2,
+  barWidth = 1.5,
   barGap = 1,
 }) => {
   const totalBarWidth = barWidth + barGap;
   const barCount = Math.min(peaks.length, Math.floor(width / totalBarWidth));
-  
+  console.log(peaks.length, barCount, width, totalBarWidth);
   return (
     <View style={[styles.container, { width, height, backgroundColor }]}>
       <Svg width={width} height={height}>

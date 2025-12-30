@@ -13,6 +13,6 @@ export const SCREEN_NAMES = {
 } as const;
 
 export const ASYNC_STORAGE_KEYS = {
-  ONBOARDING_COMPLETED: '@hair_clipper_onboarding_completed',
-  SELECTED_LANGUAGE: '@hair_clipper_selected_language',
+  ONBOARDING_COMPLETED: 'onboarding_completed',
+  SELECTED_LANGUAGE: 'app_language',
 } as const;

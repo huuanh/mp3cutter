@@ -1,8 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { I18nManager } from 'react-native';
 import { TRANSLATIONS } from './Translations';
-
-const LANGUAGE_STORAGE_KEY = 'app_language';
+import { ASYNC_STORAGE_KEYS } from '../constants';
 
 export const SUPPORTED_LANGUAGES = {
   'en': {
@@ -108,7 +107,7 @@ class LanguageManager {
 
   async init() {
     try {
-      const savedLanguage = await AsyncStorage.getItem(LANGUAGE_STORAGE_KEY);
+      const savedLanguage = await AsyncStorage.getItem(ASYNC_STORAGE_KEYS.SELECTED_LANGUAGE);
       if (savedLanguage && SUPPORTED_LANGUAGES[savedLanguage]) {
         this.currentLanguage = savedLanguage;
       }
@@ -139,7 +138,7 @@ class LanguageManager {
       this.currentLanguage = languageCode;
 
       // Save to storage
-      await AsyncStorage.setItem(LANGUAGE_STORAGE_KEY, languageCode);
+      await AsyncStorage.setItem(ASYNC_STORAGE_KEYS.SELECTED_LANGUAGE, languageCode);
       console.log(`Language changed from ${oldLanguage} to ${languageCode}`);
 
       // Load new translations
@@ -169,7 +168,7 @@ class LanguageManager {
 
   async isFirstTimeUser() {
     try {
-      const savedLanguage = await AsyncStorage.getItem(LANGUAGE_STORAGE_KEY);
+      const savedLanguage = await AsyncStorage.getItem(ASYNC_STORAGE_KEYS.SELECTED_LANGUAGE);
       console.log('Saved language:', savedLanguage);
       return !savedLanguage; // First time if no language saved
     } catch (error) {
