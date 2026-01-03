@@ -59,11 +59,20 @@ const CutAudioScreen: React.FC = () => {
   // Trim mode: 'keep' = keep selected portion, 'delete' = delete selected portion
   const [trimMode, setTrimMode] = useState<'keep' | 'delete'>('keep');
 
+  // Zoom level: 1x to 5x
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const MIN_ZOOM = 1;
+  const MAX_ZOOM = 5;
+  const [baseWaveformWidth, setBaseWaveformWidth] = useState(0); // Store the base width at 1x zoom
+
   // Waveform dimensions for drag calculations
   const waveformWidth = useRef<number>(0);
   const waveformX = useRef<number>(0);
   const waveformDataRef = useRef<TrimWaveformResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const scrollOffsetX = useRef<number>(0); // Track horizontal scroll offset
+  const horizontalScrollRef = useRef<ScrollView>(null);
+  const scrollContainerRef = useRef<View>(null); // Ref for the fixed container
 
   useEffect(() => {
     loadWaveform();
@@ -79,18 +88,34 @@ const CutAudioScreen: React.FC = () => {
       startHandlePosition.setValue(0);
       endHandlePosition.setValue(100);
 
-      // Measure waveform position after it's rendered
+      // Measure scroll container position (only once, x doesn't change)
       setTimeout(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.measureInWindow((x: number, y: number, width: number, height: number) => {
+            waveformX.current = x;
+            console.log(`📏 Scroll container measured: x=${x}, width=${width}`);
+          });
+        }
+        
+        // Measure waveform for initial width
         if (waveformRef.current) {
           waveformRef.current.measureInWindow((x: number, y: number, width: number, height: number) => {
-            waveformX.current = x;
             waveformWidth.current = width;
-            console.log(`📏 Waveform measured after load: x=${x}, width=${width}`);
+            console.log(`📱 Initial waveform width: ${width}`);
           });
         }
       }, 100);
     }
   }, [waveform]);
+
+  useEffect(() => {
+    // Update waveform width when zoom level changes (x stays the same)
+    if (waveformRef.current && baseWaveformWidth > 0) {
+      // Just update the width, x doesn't change because ScrollView container position is fixed
+      waveformWidth.current = baseWaveformWidth * zoomLevel;
+      console.log(`🔍 Zoom ${zoomLevel}x: width updated to ${waveformWidth.current}px (base=${baseWaveformWidth}) waveformcurrentX=${waveformX.current}`, );
+    }
+  }, [zoomLevel, baseWaveformWidth]);
 
   useEffect(() => {
     // Check playback state and position periodically
@@ -241,6 +266,19 @@ const CutAudioScreen: React.FC = () => {
     }
   };
 
+  // Zoom handlers
+  const handleZoomIn = () => {
+    if (zoomLevel < MAX_ZOOM) {
+      setZoomLevel(prev => Math.min(prev + 1, MAX_ZOOM));
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (zoomLevel > MIN_ZOOM) {
+      setZoomLevel(prev => Math.max(prev - MIN_ZOOM, MIN_ZOOM));
+    }
+  };
+
   // Calculate position from gesture
   const calculatePositionFromGesture = (pageX: number): number => {
     const currentWaveform = waveformDataRef.current;
@@ -250,13 +288,14 @@ const CutAudioScreen: React.FC = () => {
     }
 
     // Convert absolute page X to relative position within waveform
-    const relativeX = pageX - waveformX.current;
+    // Add scroll offset to account for horizontal scrolling
+    const relativeX = (pageX - waveformX.current) + scrollOffsetX.current;
     const percentage = Math.max(0, Math.min(1, relativeX / waveformWidth.current));
 
     // Convert percentage to milliseconds
     const position = Math.round(percentage * currentWaveform.duration);
 
-    console.log(`📍 Gesture: pageX=${pageX}, waveformX=${waveformX.current}, width=${waveformWidth.current}, %=${percentage.toFixed(2)}, pos=${position}ms`);
+    console.log(`📍 Gesture: pageX=${pageX}, waveformX=${waveformX.current}, scrollOffset=${scrollOffsetX.current.toFixed(0)}, relativeX=${relativeX.toFixed(0)}, width=${waveformWidth.current}, %=${percentage.toFixed(2)}, pos=${position}ms`);
 
     return position;
   };
@@ -381,8 +420,17 @@ const CutAudioScreen: React.FC = () => {
 
   const onWaveformLayout = (event: any) => {
     const { width } = event.nativeEvent.layout;
-    waveformWidth.current = width;
-    console.log(`📐 Layout measured: width=${width}`);
+    
+    // Store base width when first measured (at zoom level 1)
+    if (baseWaveformWidth === 0) {
+      setBaseWaveformWidth(width);
+      waveformWidth.current = width;
+      console.log(`📐 Base width set: ${width}px`);
+    } else {
+      // Update current width for zoomed state
+      waveformWidth.current = width;
+      console.log(`📐 Layout measured: width=${width}px, zoom=${zoomLevel}x, expected=${baseWaveformWidth * zoomLevel}px`);
+    }
   };
 
   return (
@@ -457,18 +505,37 @@ const CutAudioScreen: React.FC = () => {
               </View>
 
               {/* Waveform with overlay handles */}
-              <View
-                ref={waveformRef}
-                style={styles.waveformWrapper}
-                onLayout={onWaveformLayout}
-                collapsable={false}
+              <View ref={scrollContainerRef}>
+              <ScrollView
+                ref={horizontalScrollRef}
+                horizontal
+                scrollEnabled={zoomLevel > 1 && !isDragging}
+                showsHorizontalScrollIndicator={zoomLevel > 1}
+                bounces={false}
+                nestedScrollEnabled={true}
+                directionalLockEnabled={true}
+                style={styles.waveformScrollView}
+                onScroll={(event) => {
+                  scrollOffsetX.current = event.nativeEvent.contentOffset.x;
+                }}
+                scrollEventThrottle={16}
               >
-                <WaveformView
-                  peaks={waveform.peaks}
-                  height={300}
-                  color={Colors.primary}
-                  backgroundColor="rgba(255, 255, 255, 0.04)"
-                />
+                <View
+                  ref={waveformRef}
+                  style={[
+                    styles.waveformWrapper,
+                    baseWaveformWidth > 0 && { width: baseWaveformWidth * zoomLevel }
+                  ]}
+                  onLayout={onWaveformLayout}
+                  collapsable={false}
+                >
+                  <WaveformView
+                    peaks={waveform.peaks}
+                    width={baseWaveformWidth > 0 ? baseWaveformWidth * zoomLevel : undefined}
+                    height={300}
+                    color={Colors.primary}
+                    backgroundColor="rgba(255, 255, 255, 0.04)"
+                  />
 
                 {/* Overlay to show selected/unselected regions */}
                 <View style={styles.trimOverlayContainer} pointerEvents="none">
@@ -599,6 +666,8 @@ const CutAudioScreen: React.FC = () => {
                   )}
                 </View>
               </View>
+              </ScrollView>
+              </View>
 
               {/* <Text style={styles.waveformInfo}>
                 {waveform.peaks.length} bars • {formatTime(waveform.duration)}
@@ -620,10 +689,18 @@ const CutAudioScreen: React.FC = () => {
               <Text style={styles.timeDisplay}>{formatTime(isPlaying ? currentPlaybackPosition : trimStart)} / {formatTime(waveform.duration)}</Text>
               
               <View style={styles.bottomButtonGroup}>
-                <TouchableOpacity style={styles.bottomButton}>
+                <TouchableOpacity 
+                  style={[styles.bottomButton, zoomLevel === MIN_ZOOM && styles.bottomButtonDisabled]} 
+                  onPress={handleZoomOut}
+                  disabled={zoomLevel === MIN_ZOOM}
+                >
                   <Image source={require('../../assets/icon/zoomout.png')} style={styles.bottomBarIcon} />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.bottomButton}>
+                <TouchableOpacity 
+                  style={[styles.bottomButton, zoomLevel === MAX_ZOOM && styles.bottomButtonDisabled]} 
+                  onPress={handleZoomIn}
+                  disabled={zoomLevel === MAX_ZOOM}
+                >
                   <Image source={require('../../assets/icon/zoomin.png')} style={styles.bottomBarIcon} />
                 </TouchableOpacity>
               </View>
@@ -776,8 +853,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
+  waveformScrollView: {
+    maxWidth: '100%',
+  },
   waveformWrapper: {
     position: 'relative',
+    minWidth: '100%',
   },
   trimOverlayContainer: {
     position: 'absolute',
@@ -1006,6 +1087,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  bottomButtonDisabled: {
+    opacity: 0.3,
   },
   bottomBarIcon: {
     width: 24,

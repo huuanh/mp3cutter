@@ -23,18 +23,29 @@ export const WaveformView: React.FC<WaveformViewProps> = ({
   height = 200,
   color = Colors.primary,
   backgroundColor = 'transparent',
-  barWidth = 1,
-  barGap = 2.5,
+  barWidth: providedBarWidth,
+  barGap: providedBarGap,
 }) => {
-  const totalBarWidth = barWidth + barGap;
-  const barCount = Math.min(peaks.length, Math.floor(width / totalBarWidth));
-  console.log(peaks.length, barCount, width, totalBarWidth);
+  // Calculate bar width and gap dynamically to fill the entire width
+  const barCount = peaks.length;
+  const gapRatio = 0.4; // Gap is 40% of total space per bar
+  const totalBarWidth = width / barCount;
+  const calculatedBarGap = totalBarWidth * gapRatio;
+  const calculatedBarWidth = totalBarWidth - calculatedBarGap;
+  
+  // Use provided values if available, otherwise use calculated
+  const barWidth = providedBarWidth ?? calculatedBarWidth;
+  const barGap = providedBarGap ?? calculatedBarGap;
+  const finalTotalBarWidth = barWidth + barGap;
+  
+  console.log(`📊 Waveform: ${barCount} bars, width=${width}px, barWidth=${barWidth.toFixed(2)}, gap=${barGap.toFixed(2)}`);
+  
   return (
     <View style={[styles.container, { width, height, backgroundColor }]}>
       <Svg width={width} height={height}>
-        {peaks.slice(0, barCount).map((peak, index) => {
+        {peaks.map((peak, index) => {
           const barHeight = Math.max(2, peak * height);
-          const x = index * totalBarWidth;
+          const x = index * finalTotalBarWidth;
           const y = (height - barHeight) / 2;
           
           return (
