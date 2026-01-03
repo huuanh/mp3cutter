@@ -22,6 +22,7 @@
     "@react-navigation/native": "^7.1.19",
     "@react-navigation/stack": "^7.6.2",
     "expo-image-manipulator": "^14.0.7",
+    "ffmpeg-kit-react-native": "^6.0.2",
     "react": "19.1.1",
     "react-native": "0.82.1",
     "react-native-fs": "^2.20.0",

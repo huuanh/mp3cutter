@@ -10,6 +10,7 @@ export const SCREEN_NAMES = {
   SETTINGS: 'Settings',
   CUT_AUDIO: 'CutAudio',
   AUDIO_FILE_SELECT: 'AudioFileSelect',
+  SAVE_SUCCESS: 'SaveSuccess',
 } as const;
 
 export const ASYNC_STORAGE_KEYS = {

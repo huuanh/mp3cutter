@@ -13,6 +13,7 @@ import {
   SettingsScreen,
   CutAudioScreen,
   AudioFileSelectScreen,
+  SaveSuccessScreen,
 } from '../screens';
 
 export type RootStackParamList = {
@@ -27,6 +28,12 @@ export type RootStackParamList = {
     name: string;
     size: number;
     type: string;
+  };
+  [SCREEN_NAMES.SAVE_SUCCESS]: {
+    outputPath: string;
+    duration: number;
+    size: number;
+    originalName: string;
   };
 };
 
@@ -47,6 +54,7 @@ const RootNavigator: React.FC = () => {
         <Stack.Screen name={SCREEN_NAMES.SETTINGS} component={SettingsScreen} />
         <Stack.Screen name={SCREEN_NAMES.AUDIO_FILE_SELECT} component={AudioFileSelectScreen} />
         <Stack.Screen name={SCREEN_NAMES.CUT_AUDIO} component={CutAudioScreen} />
+        <Stack.Screen name={SCREEN_NAMES.SAVE_SUCCESS} component={SaveSuccessScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

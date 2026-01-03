@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Image, PanResponder, Animated } from 'react-native';
 import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
+import type { StackNavigationProp } from '@react-navigation/stack';
 import { playAudioSegment, pauseAudio, resumeAudio, stopAudio, isPlaying as checkIsPlaying, getCurrentPosition, hasSoundLoaded } from '../utils/AudioPlayerService';
+import { AudioTrimmer } from '../utils/AudioTrimmer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 
@@ -29,10 +31,11 @@ const formatFileSize = (bytes: number) => {
 };
 
 type CutAudioRouteProp = RouteProp<RootStackParamList, typeof SCREEN_NAMES.CUT_AUDIO>;
+type CutAudioNavigationProp = StackNavigationProp<RootStackParamList, typeof SCREEN_NAMES.CUT_AUDIO>;
 
 const CutAudioScreen: React.FC = () => {
   const route = useRoute<CutAudioRouteProp>();
-  const navigation = useNavigation();
+  const navigation = useNavigation<CutAudioNavigationProp>();
   const insets = useSafeAreaInsets();
   const { name, type, size, uri } = route.params;
 
@@ -70,6 +73,7 @@ const CutAudioScreen: React.FC = () => {
   const waveformX = useRef<number>(0);
   const waveformDataRef = useRef<TrimWaveformResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const scrollOffsetX = useRef<number>(0); // Track horizontal scroll offset
   const horizontalScrollRef = useRef<ScrollView>(null);
   const scrollContainerRef = useRef<View>(null); // Ref for the fixed container
@@ -168,6 +172,39 @@ const CutAudioScreen: React.FC = () => {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  const handleSave = async () => {
+    try {
+      setIsSaving(true);
+      
+      // Stop playback before saving
+      if (isPlaying) {
+        stopAudio();
+        setIsPlaying(false);
+      }
+
+      console.log(`💾 Saving audio: ${trimMode} mode, ${trimStart}ms to ${trimEnd}ms`);
+      
+      // Trim audio based on mode
+      const result = await AudioTrimmer.trim(uri, trimStart, trimEnd, trimMode);
+      
+      console.log(`✅ Audio saved: ${result.outputPath}`);
+      
+      // Navigate to success screen
+      navigation.navigate(SCREEN_NAMES.SAVE_SUCCESS, {
+        outputPath: result.outputPath,
+        duration: result.duration || (trimEnd - trimStart),
+        size: result.size,
+        originalName: name,
+      });
+      
+    } catch (error: any) {
+      console.error('❌ Save error:', error);
+      Alert.alert('Save Error', error.message || 'Failed to save audio file');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handlePlayPause = async () => {
@@ -449,7 +486,17 @@ const CutAudioScreen: React.FC = () => {
           <Text style={styles.headerTitle} numberOfLines={1}>
             {name}
           </Text>
-          <View style={styles.headerPlaceholder} />
+          <TouchableOpacity 
+            style={[styles.saveButton, isSaving && styles.saveButtonDisabled]} 
+            onPress={handleSave}
+            disabled={isSaving}
+          >
+            {isSaving ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : (
+              <Text style={styles.saveButtonText}>Save</Text>
+            )}
+          </TouchableOpacity>
         </View>
 
         <ScrollView
@@ -773,6 +820,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  saveButton: {
+    // width: 80,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  saveButtonText: {
+    fontSize: 14,
+    color: Colors.white,
+    fontWeight: '600',
+  },
   backButtonIcon: {
     width: 24,
     height: 24,
@@ -787,7 +846,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
   },
   headerPlaceholder: {
-    width: 40,
+    width: 80,
   },
   scrollContent: {
     padding: 20,
@@ -1100,6 +1159,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.white,
     fontWeight: '600',
+  },
+  saveButtonDisabled: {
+    opacity: 0.5,
   },
 });
 
