@@ -20,11 +20,11 @@ interface WaveformViewProps {
 export const WaveformView: React.FC<WaveformViewProps> = ({
   peaks,
   width = Dimensions.get('window').width - 40,
-  height = 120,
+  height = 200,
   color = Colors.primary,
   backgroundColor = 'transparent',
-  barWidth = 1.5,
-  barGap = 1,
+  barWidth = 1,
+  barGap = 2.5,
 }) => {
   const totalBarWidth = barWidth + barGap;
   const barCount = Math.min(peaks.length, Math.floor(width / totalBarWidth));

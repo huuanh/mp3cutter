@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Image, PanResponder, Animated } from 'react-native';
 import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
-import { playAudioSegment, pauseAudio, resumeAudio, stopAudio, isPlaying as checkIsPlaying } from '../utils/AudioPlayerService';
+import { playAudioSegment, pauseAudio, resumeAudio, stopAudio, isPlaying as checkIsPlaying, getCurrentPosition, hasSoundLoaded } from '../utils/AudioPlayerService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 
@@ -39,21 +39,26 @@ const CutAudioScreen: React.FC = () => {
   const [waveform, setWaveform] = useState<TrimWaveformResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Trim selection state (in milliseconds)
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(0);
   const trimStartRef = useRef(0);
   const trimEndRef = useRef(0);
-  
+
   // Animated values for smooth handle movement
   const startHandlePosition = useRef(new Animated.Value(0)).current;
   const endHandlePosition = useRef(new Animated.Value(100)).current;
-  
+
   // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
   const playbackCheckInterval = useRef<number | null>(null);
-  
+  const [currentPlaybackPosition, setCurrentPlaybackPosition] = useState(0); // in milliseconds
+  const playbackPositionAnimated = useRef(new Animated.Value(0)).current;
+
+  // Trim mode: 'keep' = keep selected portion, 'delete' = delete selected portion
+  const [trimMode, setTrimMode] = useState<'keep' | 'delete'>('keep');
+
   // Waveform dimensions for drag calculations
   const waveformWidth = useRef<number>(0);
   const waveformX = useRef<number>(0);
@@ -63,7 +68,7 @@ const CutAudioScreen: React.FC = () => {
   useEffect(() => {
     loadWaveform();
   }, [uri]);
-  
+
   useEffect(() => {
     if (waveform) {
       waveformDataRef.current = waveform;
@@ -73,7 +78,7 @@ const CutAudioScreen: React.FC = () => {
       trimEndRef.current = waveform.duration;
       startHandlePosition.setValue(0);
       endHandlePosition.setValue(100);
-      
+
       // Measure waveform position after it's rendered
       setTimeout(() => {
         if (waveformRef.current) {
@@ -86,13 +91,23 @@ const CutAudioScreen: React.FC = () => {
       }, 100);
     }
   }, [waveform]);
-  
+
   useEffect(() => {
-    // Check playback state periodically
+    // Check playback state and position periodically
     playbackCheckInterval.current = setInterval(() => {
-      setIsPlaying(checkIsPlaying());
+      const playing = checkIsPlaying();
+      setIsPlaying(playing);
+
+      if (playing && waveformDataRef.current) {
+        // Get current playback position from AudioPlayerService
+        getCurrentPosition((position) => {
+          setCurrentPlaybackPosition(position);
+          const percentage = (position / waveformDataRef.current!.duration) * 100;
+          playbackPositionAnimated.setValue(percentage);
+        });
+      }
     }, 200);
-    
+
     return () => {
       if (playbackCheckInterval.current) {
         clearInterval(playbackCheckInterval.current);
@@ -105,15 +120,15 @@ const CutAudioScreen: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       console.log('🎵 Loading waveform for:', uri);
       const startTime = Date.now();
-      
-      const result = await WaveformGenerator.generate(uri, 160);
-      
+
+      const result = await WaveformGenerator.generate(uri, 125);
+
       const elapsed = Date.now() - startTime;
       console.log(`✅ Waveform loaded in ${elapsed}ms, ${result.peaks.length} bars, ${result.duration}ms duration`);
-      
+
       setWaveform(result);
     } catch (err: any) {
       console.error('❌ Waveform error:', err);
@@ -129,7 +144,7 @@ const CutAudioScreen: React.FC = () => {
     const seconds = totalSeconds % 60;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
-  
+
   const handlePlayPause = async () => {
     try {
       if (isPlaying) {
@@ -137,14 +152,17 @@ const CutAudioScreen: React.FC = () => {
         pauseAudio();
         setIsPlaying(false);
       } else {
-        // Check if we need to resume or start new playback
-        if (checkIsPlaying()) {
+        // Check if sound is loaded (paused) or need to start new
+        const soundLoaded = hasSoundLoaded();
+        
+        if (soundLoaded) {
+          // Resume existing sound
           resumeAudio();
           setIsPlaying(true);
         } else {
-          // Start playback from trimStart to trimEnd with loop
-          const success = await playAudioSegment(uri, trimStart, trimEnd, true);
-          
+          // Start new playback based on trim mode
+          const success = await playAudioSegment(uri, trimStart, trimEnd, true, trimMode);
+
           if (success) {
             setIsPlaying(true);
           } else {
@@ -158,7 +176,71 @@ const CutAudioScreen: React.FC = () => {
       setIsPlaying(false);
     }
   };
-  
+
+  // Adjust trim times with +/- buttons
+  const adjustTrimStart = async (delta: number) => {
+    if (!waveformDataRef.current) return;
+    
+    const newStart = Math.max(0, Math.min(trimStart + delta, trimEnd - 1000));
+    if (newStart === trimStart) return; // No change
+    
+    setTrimStart(newStart);
+    trimStartRef.current = newStart;
+    const percentage = (newStart / waveformDataRef.current.duration) * 100;
+    startHandlePosition.setValue(percentage);
+    
+    // Restart playback if playing
+    if (isPlaying) {
+      await playAudioSegment(uri, newStart, trimEnd, true, trimMode);
+    }
+  };
+
+  const adjustTrimEnd = async (delta: number) => {
+    if (!waveformDataRef.current) return;
+    
+    const newEnd = Math.max(trimStart + 1000, Math.min(trimEnd + delta, waveformDataRef.current.duration));
+    if (newEnd === trimEnd) return; // No change
+    
+    setTrimEnd(newEnd);
+    trimEndRef.current = newEnd;
+    const percentage = (newEnd / waveformDataRef.current.duration) * 100;
+    endHandlePosition.setValue(percentage);
+    
+    // Restart playback if playing
+    if (isPlaying) {
+      await playAudioSegment(uri, trimStart, newEnd, true, trimMode);
+    }
+  };
+
+  // Mark start: Set trimStart to 0
+  const handleMarkStart = async () => {
+    if (!waveformDataRef.current || trimStart === 0) return;
+    
+    setTrimStart(0);
+    trimStartRef.current = 0;
+    startHandlePosition.setValue(0);
+    
+    // Restart playback if playing
+    if (isPlaying) {
+      await playAudioSegment(uri, 0, trimEnd, true, trimMode);
+    }
+  };
+
+  // Mark end: Set trimEnd to duration
+  const handleMarkEnd = async () => {
+    if (!waveformDataRef.current || trimEnd === waveformDataRef.current.duration) return;
+    
+    const duration = waveformDataRef.current.duration;
+    setTrimEnd(duration);
+    trimEndRef.current = duration;
+    endHandlePosition.setValue(100);
+    
+    // Restart playback if playing
+    if (isPlaying) {
+      await playAudioSegment(uri, trimStart, duration, true, trimMode);
+    }
+  };
+
   // Calculate position from gesture
   const calculatePositionFromGesture = (pageX: number): number => {
     const currentWaveform = waveformDataRef.current;
@@ -166,19 +248,19 @@ const CutAudioScreen: React.FC = () => {
       console.log('⚠️ Cannot calculate: waveform=', !!currentWaveform, 'width=', waveformWidth.current);
       return 0;
     }
-    
+
     // Convert absolute page X to relative position within waveform
     const relativeX = pageX - waveformX.current;
     const percentage = Math.max(0, Math.min(1, relativeX / waveformWidth.current));
-    
+
     // Convert percentage to milliseconds
     const position = Math.round(percentage * currentWaveform.duration);
-    
+
     console.log(`📍 Gesture: pageX=${pageX}, waveformX=${waveformX.current}, width=${waveformWidth.current}, %=${percentage.toFixed(2)}, pos=${position}ms`);
-    
+
     return position;
   };
-  
+
   // Pan responder for start handle
   const startHandlePanResponder = useRef(
     PanResponder.create({
@@ -198,7 +280,7 @@ const CutAudioScreen: React.FC = () => {
       onPanResponderMove: (evt, gestureState) => {
         const newStart = calculatePositionFromGesture(evt.nativeEvent.pageX);
         const currentWaveform = waveformDataRef.current;
-        
+
         console.log(`✋ Moving start handle to: ${newStart}ms (current: ${trimStartRef.current}ms)`);
         // Ensure start is before end (with minimum gap of 1 second)
         if (newStart >= 0 && newStart < trimEndRef.current - 1000 && currentWaveform) {
@@ -208,13 +290,35 @@ const CutAudioScreen: React.FC = () => {
           startHandlePosition.setValue(percentage);
         }
       },
-      onPanResponderRelease: () => {
+      onPanResponderRelease: async () => {
         console.log(`✅ Start handle released at: ${trimStart}ms`);
         setIsDragging(false);
+
+        // Seek playback based on trim mode
+        if (trimMode === 'keep') {
+          // Keep mode: seek to trimStart and play from there
+          setCurrentPlaybackPosition(trimStartRef.current);
+          const percentage = waveformDataRef.current
+            ? (trimStartRef.current / waveformDataRef.current.duration) * 100
+            : 0;
+          playbackPositionAnimated.setValue(percentage);
+
+          // Auto-play from new position
+          await playAudioSegment(uri, trimStartRef.current, trimEndRef.current, true, 'keep');
+          setIsPlaying(true);
+        } else {
+          // Delete mode: seek to start (0) and play with skip
+          setCurrentPlaybackPosition(0);
+          playbackPositionAnimated.setValue(0);
+
+          // Auto-play from beginning, skipping deleted section
+          await playAudioSegment(uri, trimStartRef.current, trimEndRef.current, true, 'delete');
+          setIsPlaying(true);
+        }
       },
     })
   ).current;
-  
+
   // Pan responder for end handle
   const endHandlePanResponder = useRef(
     PanResponder.create({
@@ -243,16 +347,38 @@ const CutAudioScreen: React.FC = () => {
           endHandlePosition.setValue(percentage);
         }
       },
-      onPanResponderRelease: () => {
+      onPanResponderRelease: async () => {
         console.log(`✅ End handle released at: ${trimEnd}ms`);
         setIsDragging(false);
+
+        // Seek playback based on trim mode
+        if (trimMode === 'keep') {
+          // Keep mode: seek to trimStart and play from there
+          setCurrentPlaybackPosition(trimStartRef.current);
+          const percentage = waveformDataRef.current
+            ? (trimStartRef.current / waveformDataRef.current.duration) * 100
+            : 0;
+          playbackPositionAnimated.setValue(percentage);
+
+          // Auto-play from new position
+          await playAudioSegment(uri, trimStartRef.current, trimEndRef.current, true, 'keep');
+          setIsPlaying(true);
+        } else {
+          // Delete mode: seek to start (0) and play with skip
+          setCurrentPlaybackPosition(0);
+          playbackPositionAnimated.setValue(0);
+
+          // Auto-play from beginning, skipping deleted section
+          await playAudioSegment(uri, trimStartRef.current, trimEndRef.current, true, 'delete');
+          setIsPlaying(true);
+        }
       },
     })
   ).current;
-  
+
   // Measure waveform layout - use absolute position
   const waveformRef = useRef<View>(null);
-  
+
   const onWaveformLayout = (event: any) => {
     const { width } = event.nativeEvent.layout;
     waveformWidth.current = width;
@@ -266,7 +392,7 @@ const CutAudioScreen: React.FC = () => {
         start={GradientStyles.dark.start}
         end={GradientStyles.dark.end}
         style={styles.container}>
-        
+
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
@@ -278,29 +404,11 @@ const CutAudioScreen: React.FC = () => {
           <View style={styles.headerPlaceholder} />
         </View>
 
-        <ScrollView 
-          contentContainerStyle={styles.scrollContent} 
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
           bounces={false}
           scrollEnabled={!isDragging}
         >
-          {/* File info */}
-          <View style={styles.infoCard}>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Type:</Text>
-              <Text style={styles.infoValue}>{type}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Size:</Text>
-              <Text style={styles.infoValue}>{formatFileSize(size)}</Text>
-            </View>
-            {waveform && (
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Duration:</Text>
-                <Text style={styles.infoValue}>{formatTime(waveform.duration)}</Text>
-              </View>
-            )}
-          </View>
-
           {/* Waveform */}
           {loading ? (
             <View style={styles.loadingContainer}>
@@ -317,53 +425,117 @@ const CutAudioScreen: React.FC = () => {
             </View>
           ) : waveform ? (
             <View style={styles.waveformContainer}>
-              <Text style={styles.sectionTitle}>Audio Waveform</Text>
-              
               {/* Trim controls at top */}
               <View style={styles.trimControls}>
                 <View style={styles.trimControl}>
-                  <Image source={require('../../assets/icon/mark_start.png')} style={styles.trimMarkerIcon} />
+                  <TouchableOpacity style={styles.trimButton} onPress={() => adjustTrimStart(1000)}>
+                    <Text style={styles.trimButtonText}>+</Text>
+                  </TouchableOpacity>
                   <View style={styles.trimTimeBox}>
                     <Text style={styles.trimTimeText}>{formatTime(trimStart)}</Text>
                   </View>
+                  <TouchableOpacity style={styles.trimButton} onPress={() => adjustTrimStart(-1000)}>
+                    <Text style={styles.trimButtonText}>−</Text>
+                  </TouchableOpacity>
                 </View>
-                
                 <View style={styles.trimCenter}>
                   <Text style={styles.trimLabel}>Selected</Text>
                   <Text style={styles.trimSelectedTime}>{formatTime(trimEnd - trimStart)}</Text>
                 </View>
-                
+
                 <View style={styles.trimControl}>
+                  <TouchableOpacity style={styles.trimButton} onPress={() => adjustTrimEnd(1000)}>
+                    <Text style={styles.trimButtonText}>+</Text>
+                  </TouchableOpacity>
                   <View style={styles.trimTimeBox}>
                     <Text style={styles.trimTimeText}>{formatTime(trimEnd)}</Text>
                   </View>
-                  <Image source={require('../../assets/icon/mark_end.png')} style={styles.trimMarkerIcon} />
+                  <TouchableOpacity style={styles.trimButton} onPress={() => adjustTrimEnd(-1000)}>
+                    <Text style={styles.trimButtonText}>-</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
-              
+
               {/* Waveform with overlay handles */}
-              <View 
+              <View
                 ref={waveformRef}
                 style={styles.waveformWrapper}
                 onLayout={onWaveformLayout}
                 collapsable={false}
               >
-                <WaveformView 
+                <WaveformView
                   peaks={waveform.peaks}
-                  height={120}
-                  color="#8E5AF7"
+                  height={300}
+                  color={Colors.primary}
                   backgroundColor="rgba(255, 255, 255, 0.04)"
                 />
-                
+
+                {/* Overlay to show selected/unselected regions */}
+                <View style={styles.trimOverlayContainer} pointerEvents="none">
+                  {trimMode === 'keep' ? (
+                    <>
+                      {/* Gray out left side */}
+                      <Animated.View
+                        style={[
+                          styles.trimOverlay,
+                          styles.trimOverlayGray,
+                          {
+                            left: 0,
+                            width: startHandlePosition.interpolate({
+                              inputRange: [0, 100],
+                              outputRange: ['0%', '100%']
+                            })
+                          }
+                        ]}
+                      />
+                      {/* Gray out right side */}
+                      <Animated.View
+                        style={[
+                          styles.trimOverlay,
+                          styles.trimOverlayGray,
+                          {
+                            left: endHandlePosition.interpolate({
+                              inputRange: [0, 100],
+                              outputRange: ['0%', '100%']
+                            }),
+                            right: 0
+                          }
+                        ]}
+                      />
+                    </>
+                  ) : (
+                    /* Gray out middle (selected for deletion) */
+                    <Animated.View
+                      style={[
+                        styles.trimOverlay,
+                        styles.trimOverlayGray,
+                        {
+                          left: startHandlePosition.interpolate({
+                            inputRange: [0, 100],
+                            outputRange: ['0%', '100%']
+                          }),
+                          width: Animated.subtract(
+                            endHandlePosition,
+                            startHandlePosition
+                          ).interpolate({
+                            inputRange: [0, 100],
+                            outputRange: ['0%', '100%']
+                          })
+                        }
+                      ]}
+                    />
+                  )}
+                </View>
+
                 {/* Trim handles overlay */}
                 <View style={styles.trimHandlesContainer} collapsable={false}>
                   {/* Start handle */}
-                  <Animated.View 
+                  <Animated.View
                     {...startHandlePanResponder.panHandlers}
                     style={[
-                      styles.trimHandle, 
+                      styles.trimHandle,
                       styles.trimHandleStart,
-                      { 
+                      {
                         left: startHandlePosition.interpolate({
                           inputRange: [0, 100],
                           outputRange: ['0%', '100%']
@@ -379,14 +551,14 @@ const CutAudioScreen: React.FC = () => {
                     </View>
                     <View style={styles.handleLine} />
                   </Animated.View>
-                  
+
                   {/* End handle */}
-                  <Animated.View 
+                  <Animated.View
                     {...endHandlePanResponder.panHandlers}
                     style={[
-                      styles.trimHandle, 
+                      styles.trimHandle,
                       styles.trimHandleEnd,
-                      { 
+                      {
                         left: endHandlePosition.interpolate({
                           inputRange: [0, 100],
                           outputRange: ['0%', '100%']
@@ -402,65 +574,100 @@ const CutAudioScreen: React.FC = () => {
                     </View>
                     <View style={styles.handleLine} />
                   </Animated.View>
-                  
+
                   {/* Time indicator in middle */}
                   <View style={styles.centerTimeIndicator}>
                     <Text style={styles.centerTime}>{formatTime((trimStart + trimEnd) / 2)}</Text>
                   </View>
+
+                  {/* Playback position indicator */}
+                  {isPlaying && (
+                    <Animated.View
+                      style={[
+                        styles.playbackIndicator,
+                        {
+                          left: playbackPositionAnimated.interpolate({
+                            inputRange: [0, 100],
+                            outputRange: ['0%', '100%']
+                          })
+                        }
+                      ]}
+                      pointerEvents="none"
+                    >
+                      <View style={styles.playbackLine} />
+                    </Animated.View>
+                  )}
                 </View>
               </View>
-              
-              <Text style={styles.waveformInfo}>
+
+              {/* <Text style={styles.waveformInfo}>
                 {waveform.peaks.length} bars • {formatTime(waveform.duration)}
-              </Text>
+              </Text> */}
             </View>
           ) : null}
+          {/* Bottom action bar */}
+          {waveform && (
+            <View style={styles.bottomBar}>
+              <View style={styles.bottomButtonGroup}>
+                <TouchableOpacity style={styles.bottomButton} onPress={handleMarkStart}>
+                  <Image source={require('../../assets/icon/mark_start.png')} style={styles.bottomBarIcon} />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.bottomButton} onPress={handleMarkEnd}>
+                  <Image source={require('../../assets/icon/mark_end.png')} style={styles.bottomBarIcon} />
+                </TouchableOpacity>
+              </View>
 
+              <Text style={styles.timeDisplay}>{formatTime(isPlaying ? currentPlaybackPosition : trimStart)} / {formatTime(waveform.duration)}</Text>
+              
+              <View style={styles.bottomButtonGroup}>
+                <TouchableOpacity style={styles.bottomButton}>
+                  <Image source={require('../../assets/icon/zoomout.png')} style={styles.bottomBarIcon} />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.bottomButton}>
+                  <Image source={require('../../assets/icon/zoomin.png')} style={styles.bottomBarIcon} />
+                </TouchableOpacity>
+              </View>
+
+            </View>
+          )}
           {/* Action buttons */}
           {waveform && (
             <View style={styles.actionsContainer}>
+              <TouchableOpacity style={styles.playButton} onPress={handlePlayPause}>
+                <Image
+                  source={isPlaying
+                    ? require('../../assets/icon/pause.png')
+                    : require('../../assets/icon/start.png')
+                  }
+                  style={styles.playButtonIcon}
+                />
+              </TouchableOpacity>
+
               <View style={styles.actionRow}>
-                <TouchableOpacity style={styles.actionButton}>
+                <TouchableOpacity
+                  style={[
+                    styles.actionButton,
+                    trimMode === 'keep' && styles.actionButtonActive
+                  ]}
+                  onPress={() => setTrimMode('keep')}
+                >
                   <Image source={require('../../assets/icon/keep_select.png')} style={styles.actionButtonIcon} />
                   <Text style={styles.actionText}>Keep selected</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.actionButton}>
+                <TouchableOpacity
+                  style={[
+                    styles.actionButton,
+                    trimMode === 'delete' && styles.actionButtonActive
+                  ]}
+                  onPress={() => setTrimMode('delete')}
+                >
                   <Image source={require('../../assets/icon/del_select.png')} style={styles.actionButtonIcon} />
                   <Text style={styles.actionText}>Delete selected</Text>
                 </TouchableOpacity>
               </View>
-              
-              <TouchableOpacity style={styles.playButton} onPress={handlePlayPause}>
-                <Image 
-                  source={isPlaying 
-                    ? require('../../assets/icon/pause.png') 
-                    : require('../../assets/icon/start.png')
-                  } 
-                  style={styles.playButtonIcon} 
-                />
-              </TouchableOpacity>
             </View>
           )}
         </ScrollView>
-        
-        {/* Bottom action bar */}
-        {waveform && (
-          <View style={styles.bottomBar}>
-            <TouchableOpacity style={styles.bottomButton}>
-              <Image source={require('../../assets/icon/return.png')} style={styles.bottomBarIcon} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.bottomButton}>
-              <Image source={require('../../assets/icon/forward.png')} style={styles.bottomBarIcon} />
-            </TouchableOpacity>
-            <Text style={styles.timeDisplay}>{formatTime(trimStart)} / {formatTime(waveform.duration)}</Text>
-            <TouchableOpacity style={styles.bottomButton}>
-              <Image source={require('../../assets/icon/zoomout.png')} style={styles.bottomBarIcon} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.bottomButton}>
-              <Image source={require('../../assets/icon/zoomin.png')} style={styles.bottomBarIcon} />
-            </TouchableOpacity>
-          </View>
-        )}
       </LinearGradient>
     </View>
   );
@@ -511,12 +718,6 @@ const styles = StyleSheet.create({
   waveformContainer: {
     marginBottom: 20,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.white,
-    marginBottom: 12,
-  },
   trimControls: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -532,7 +733,7 @@ const styles = StyleSheet.create({
   trimMarkerIcon: {
     width: 24,
     height: 24,
-    tintColor: '#8E5AF7',
+    tintColor: Colors.white,
   },
   trimButton: {
     width: 28,
@@ -548,7 +749,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   trimTimeBox: {
-    backgroundColor: 'rgba(20, 20, 30, 0.8)',
+    backgroundColor: 'rgba(20, 20, 30, 0.99)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
@@ -566,17 +767,33 @@ const styles = StyleSheet.create({
   },
   trimLabel: {
     fontSize: 11,
-    color: Colors.backgroundLight,
+    color: Colors.white,
     marginBottom: 2,
   },
   trimSelectedTime: {
     fontSize: 14,
-    color: '#8E5AF7',
+    color: Colors.white,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
   waveformWrapper: {
     position: 'relative',
+  },
+  trimOverlayContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    pointerEvents: 'none',
+  },
+  trimOverlay: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+  },
+  trimOverlayGray: {
+    backgroundColor: 'rgba(0, 0, 0, 0.68)',
   },
   trimHandlesContainer: {
     position: 'absolute',
@@ -644,32 +861,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
   },
+  playbackIndicator: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 2,
+    zIndex: 5,
+  },
+  playbackLine: {
+    width: 2,
+    height: '100%',
+    backgroundColor: '#FF6B6B',
+    shadowColor: '#FF6B6B',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+    elevation: 5,
+  },
   waveformInfo: {
     fontSize: 12,
     color: Colors.backgroundLight,
     textAlign: 'center',
     marginTop: 8,
-  },
-  infoCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
-  },
-  infoLabel: {
-    fontSize: 13,
-    color: Colors.backgroundLight,
-    fontWeight: '600',
-  },
-  infoValue: {
-    fontSize: 13,
-    color: Colors.white,
-    fontWeight: '400',
   },
   loadingContainer: {
     alignItems: 'center',
@@ -713,13 +926,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   actionsContainer: {
-    marginTop: 24,
+    // marginTop: 24,
     marginBottom: 80,
   },
   actionRow: {
     flexDirection: 'row',
     gap: 12,
-    marginBottom: 16,
+    marginTop: 16,
   },
   actionButton: {
     flex: 1,
@@ -734,10 +947,15 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(142, 90, 247, 0.3)',
     gap: 8,
   },
+  actionButtonActive: {
+    backgroundColor: 'rgba(142, 90, 247, 0.2)',
+    borderColor: '#8E5AF7',
+    borderWidth: 2,
+  },
   actionButtonIcon: {
     width: 20,
     height: 20,
-    tintColor: Colors.white,
+    // tintColor: Colors.white,
   },
   actionText: {
     fontSize: 14,
@@ -760,18 +978,26 @@ const styles = StyleSheet.create({
     tintColor: Colors.black,
   },
   bottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    // position: 'absolute',
+    // bottom: 0,
+    // left: 0,
+    // right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: 'rgba(20, 20, 30, 0.95)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    // paddingHorizontal: 20,
+    // paddingVertical: 16,
+    // backgroundColor: 'rgba(20, 20, 30, 0.95)',
+    // borderTopWidth: 1,
+    // borderTopColor: 'rgba(255, 255, 255, 0.08)',
+  },
+
+  bottomButtonGroup: {
+    flexDirection: 'row',
+    gap: 5,
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    padding: 6,
   },
   bottomButton: {
     width: 44,
